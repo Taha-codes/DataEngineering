@@ -1,0 +1,87 @@
+services:
+  # Existing PostgreSQL service
+  postgres:
+    image: debezium/postgres:15
+    container_name: cdc-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: cdc_demo
+    volumes:
+      - ./postgres-data:/var/lib/postgresql/data
+      - ./postgres-config:/docker-entrypoint-initdb.d
+      - ./postgres-config/conf/postgresql.conf:/etc/postgresql/postgresql.conf
+    command: postgres -c config_file=/etc/postgresql/postgresql.conf
+    networks:
+      - cdc-network
+
+  # Zookeeper service (required by Kafka)
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.4.0
+    container_name: cdc-zookeeper
+    ports:
+      - "2181:2181"
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    volumes:
+      - ./zookeeper-data:/var/lib/zookeeper/data
+      - ./zookeeper-logs:/var/lib/zookeeper/log
+    networks:
+      - cdc-network
+
+  # Kafka service
+  kafka:
+    image: confluentinc/cp-kafka:7.4.0
+    container_name: cdc-kafka
+    ports:
+      - "9092:9092"
+      - "29092:29092"
+    depends_on:
+      - zookeeper
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 100
+    volumes:
+      - ./kafka-data:/var/lib/kafka/data
+    networks:
+      - cdc-network
+
+  # Kafka Connect with Debezium
+  kafka-connect:
+    image: debezium/connect:2.5
+    container_name: cdc-kafka-connect
+    ports:
+      - "8083:8083"
+    depends_on:
+      - kafka
+      - postgres
+    environment:
+      BOOTSTRAP_SERVERS: kafka:29092
+      GROUP_ID: connect-cdc-group
+      CONFIG_STORAGE_TOPIC: debezium_configs
+      OFFSET_STORAGE_TOPIC: debezium_offsets
+      STATUS_STORAGE_TOPIC: debezium_status
+    networks:
+      - cdc-network
+    restart: unless-stopped
+
+networks:
+  cdc-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  zookeeper_data:
+  kafka_data:
+  kafka_connect_data:
