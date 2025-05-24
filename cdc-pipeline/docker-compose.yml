@@ -1,97 +1,137 @@
 
 services:
-  # Existing PostgreSQL service
+  # PostgreSQL Database
   postgres:
-    image: debezium/postgres:15
+    image: postgres:15
     container_name: cdc-postgres
-    ports:
-      - "5432:5432"
+    hostname: postgres
     environment:
+      POSTGRES_DB: cdc_demo
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: cdc_demo
+    ports:
+      - "5432:5432"
     volumes:
-      - ./postgres-data:/var/lib/postgresql/data
-      - ./postgres-config:/docker-entrypoint-initdb.d
-      - ./postgres-config/conf/postgresql.conf:/etc/postgresql/postgresql.conf
-    command: postgres -c config_file=/etc/postgresql/postgresql.conf
+      - postgres-data:/var/lib/postgresql/data
+      - ./postgres-config/conf:/etc/postgresql/conf.d
+      - ./01-init.sql:/docker-entrypoint-initdb.d/01-init.sql
+      - ./02-cdc-setup.sql:/docker-entrypoint-initdb.d/02-cdc-setup.sql
+    command: ["postgres", "-c", "config_file=/etc/postgresql/conf.d/postgresql.conf"]
     networks:
       - cdc-network
 
-  # Zookeeper service (required by Kafka)
+  # Zookeeper
   zookeeper:
     image: confluentinc/cp-zookeeper:7.4.0
     container_name: cdc-zookeeper
-    ports:
-      - "2181:2181"
+    hostname: zookeeper
     environment:
       ZOOKEEPER_CLIENT_PORT: 2181
       ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
     volumes:
-      - ./zookeeper-data:/var/lib/zookeeper/data
-      - ./zookeeper-logs:/var/lib/zookeeper/log
+      - zookeeper-data:/var/lib/zookeeper/data
+      - zookeeper-logs:/var/lib/zookeeper/log
     networks:
       - cdc-network
 
-  # Kafka service
+  # Kafka
   kafka:
     image: confluentinc/cp-kafka:7.4.0
     container_name: cdc-kafka
+    hostname: kafka
+    depends_on:
+      - zookeeper
     ports:
       - "9092:9092"
       - "29092:29092"
-    depends_on:
-      - zookeeper
     environment:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
-      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
-      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
-      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 100
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
+      KAFKA_DELETE_TOPIC_ENABLE: 'true'
     volumes:
-      - ./kafka-data:/var/lib/kafka/data
+      - kafka-data:/var/lib/kafka/data
     networks:
       - cdc-network
 
-  # Kafka Connect with Debezium
+  # Kafka Connect
   kafka-connect:
-    image: debezium/connect:2.5
+    image: confluentinc/cp-kafka-connect:7.4.0
     container_name: cdc-kafka-connect
-    ports:
-      - "8083:8083"
+    hostname: kafka-connect
     depends_on:
       - kafka
       - postgres
+      - hdfs-namenode
+    ports:
+      - "8083:8083"
     environment:
-      BOOTSTRAP_SERVERS: kafka:29092
-      GROUP_ID: connect-cdc-group
-      CONFIG_STORAGE_TOPIC: debezium_configs
-      OFFSET_STORAGE_TOPIC: debezium_offsets
-      STATUS_STORAGE_TOPIC: debezium_status
+      CONNECT_BOOTSTRAP_SERVERS: kafka:29092
+      CONNECT_REST_ADVERTISED_HOST_NAME: kafka-connect
+      CONNECT_REST_PORT: 8083
+      CONNECT_GROUP_ID: cdc-connect-cluster
+      CONNECT_CONFIG_STORAGE_TOPIC: connect-configs
+      CONNECT_OFFSET_STORAGE_TOPIC: connect-offsets
+      CONNECT_STATUS_STORAGE_TOPIC: connect-status
+      CONNECT_CONFIG_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_OFFSET_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_STATUS_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_KEY_CONVERTER: org.apache.kafka.connect.json.JsonConverter
+      CONNECT_VALUE_CONVERTER: org.apache.kafka.connect.json.JsonConverter
+      CONNECT_KEY_CONVERTER_SCHEMAS_ENABLE: 'false'
+      CONNECT_VALUE_CONVERTER_SCHEMAS_ENABLE: 'false'
+      CONNECT_INTERNAL_KEY_CONVERTER: org.apache.kafka.connect.json.JsonConverter
+      CONNECT_INTERNAL_VALUE_CONVERTER: org.apache.kafka.connect.json.JsonConverter
+      CONNECT_PLUGIN_PATH: /usr/share/java,/usr/share/confluent-hub-components,/usr/local/share/kafka/plugins
+      # HDFS Configuration
+      CONNECT_HDFS_URL: hdfs://namenode:9000
+    volumes:
+      - kafka-connect-data:/tmp/connect-configs
+      - ./kafka-connect-data:/etc/kafka-connect
+      - ./hdfs/config:/etc/hadoop/conf
+    command:
+      - bash
+      - -c
+      - |
+        echo "Installing connectors..."
+        confluent-hub install --no-prompt debezium/debezium-connector-postgresql:2.5.4
+        confluent-hub install --no-prompt confluentinc/kafka-connect-hdfs:10.2.0
+        echo "Starting Kafka Connect..."
+        /etc/confluent/docker/run
     networks:
       - cdc-network
-    restart: unless-stopped
 
-  
+  # HDFS NameNode
   hdfs-namenode:
     image: apache/hadoop:3.3.4
     container_name: cdc-hdfs-namenode
     hostname: namenode
     environment:
       - CLUSTER_NAME=cdc-cluster
-    env_file:
-      - ./hdfs/hadoop.env
+      - CORE_CONF_fs_defaultFS=hdfs://namenode:9000
+      - CORE_CONF_hadoop_http_staticuser_user=root
+      - CORE_CONF_hadoop_proxyuser_hue_hosts=*
+      - CORE_CONF_hadoop_proxyuser_hue_groups=*
+      - CORE_CONF_io_compression_codecs=org.apache.hadoop.io.compress.SnappyCodec
+      - HDFS_CONF_dfs_webhdfs_enabled=true
+      - HDFS_CONF_dfs_permissions_enabled=false
+      - HDFS_CONF_dfs_nameservices=hdfscluster
+      - HDFS_CONF_dfs_replication=1
     ports:
-      - "9870:9870"  # Web UI
+      - "9870:9870"  # NameNode Web UI
       - "9000:9000"  # HDFS port
     volumes:
       - hdfs-namenode:/hadoop/dfs/name
       - ./hdfs/config:/opt/hadoop/etc/hadoop
+    command: ["hdfs", "namenode"]
     networks:
       - cdc-network
 
@@ -101,27 +141,62 @@ services:
     container_name: cdc-hdfs-datanode
     hostname: datanode
     environment:
-      - SERVICE_PRECONDITION=namenode:9870
-    env_file:
-      - ./hdfs/hadoop.env
+      - CORE_CONF_fs_defaultFS=hdfs://namenode:9000
+      - CORE_CONF_hadoop_http_staticuser_user=root
+      - CORE_CONF_hadoop_proxyuser_hue_hosts=*
+      - CORE_CONF_hadoop_proxyuser_hue_groups=*
+      - CORE_CONF_io_compression_codecs=org.apache.hadoop.io.compress.SnappyCodec
+      - HDFS_CONF_dfs_webhdfs_enabled=true
+      - HDFS_CONF_dfs_permissions_enabled=false
+      - HDFS_CONF_dfs_nameservices=hdfscluster
+      - HDFS_CONF_dfs_replication=1
     ports:
-      - "9864:9864"  # Web UI
+      - "9864:9864"  # DataNode Web UI
+      - "9866:9866"  # DataNode IPC port
     volumes:
       - hdfs-datanode:/hadoop/dfs/data
       - ./hdfs/config:/opt/hadoop/etc/hadoop
+    command: ["hdfs", "datanode"]
     networks:
       - cdc-network
     depends_on:
       - hdfs-namenode
+    restart: unless-stopped
+
+  # HDFS Client (for testing and management)
+  hdfs-client:
+    image: apache/hadoop:3.3.4
+    container_name: cdc-hdfs-client
+    hostname: hdfs-client
+    environment:
+      - CORE_CONF_fs_defaultFS=hdfs://namenode:9000
+      - CORE_CONF_hadoop_http_staticuser_user=root
+    volumes:
+      - ./hdfs/config:/opt/hadoop/etc/hadoop
+    command: ["tail", "-f", "/dev/null"]  # Keep container running
+    networks:
+      - cdc-network
+    depends_on:
+      - hdfs-namenode
+      - hdfs-datanode
+
+volumes:
+  postgres-data:
+    driver: local
+  zookeeper-data:
+    driver: local
+  zookeeper-logs:
+    driver: local
+  kafka-data:
+    driver: local
+  kafka-connect-data:
+    driver: local
+  hdfs-namenode:
+    driver: local
+  hdfs-datanode:
+    driver: local
 
 networks:
   cdc-network:
     driver: bridge
-
-volumes:
-  postgres_data:
-  zookeeper_data:
-  kafka_data:
-  kafka_connect_data:
-  hdfs-namenode:
-  hdfs-datanode:
+    name: cdc-network
