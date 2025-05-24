@@ -1,3 +1,4 @@
+
 services:
   # Existing PostgreSQL service
   postgres:
@@ -76,6 +77,43 @@ services:
       - cdc-network
     restart: unless-stopped
 
+  
+  hdfs-namenode:
+    image: apache/hadoop:3.3.4
+    container_name: cdc-hdfs-namenode
+    hostname: namenode
+    environment:
+      - CLUSTER_NAME=cdc-cluster
+    env_file:
+      - ./hdfs/hadoop.env
+    ports:
+      - "9870:9870"  # Web UI
+      - "9000:9000"  # HDFS port
+    volumes:
+      - hdfs-namenode:/hadoop/dfs/name
+      - ./hdfs/config:/opt/hadoop/etc/hadoop
+    networks:
+      - cdc-network
+
+  # HDFS DataNode
+  hdfs-datanode:
+    image: apache/hadoop:3.3.4
+    container_name: cdc-hdfs-datanode
+    hostname: datanode
+    environment:
+      - SERVICE_PRECONDITION=namenode:9870
+    env_file:
+      - ./hdfs/hadoop.env
+    ports:
+      - "9864:9864"  # Web UI
+    volumes:
+      - hdfs-datanode:/hadoop/dfs/data
+      - ./hdfs/config:/opt/hadoop/etc/hadoop
+    networks:
+      - cdc-network
+    depends_on:
+      - hdfs-namenode
+
 networks:
   cdc-network:
     driver: bridge
@@ -85,3 +123,5 @@ volumes:
   zookeeper_data:
   kafka_data:
   kafka_connect_data:
+  hdfs-namenode:
+  hdfs-datanode:
