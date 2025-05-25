@@ -111,7 +111,7 @@ services:
 
   # HDFS NameNode
   hdfs-namenode:
-    image: apache/hadoop:3.3.4
+    image: bde2020/hadoop-namenode:2.0.0-hadoop3.2.1-java8
     container_name: cdc-hdfs-namenode
     hostname: namenode
     environment:
@@ -120,24 +120,21 @@ services:
       - CORE_CONF_hadoop_http_staticuser_user=root
       - CORE_CONF_hadoop_proxyuser_hue_hosts=*
       - CORE_CONF_hadoop_proxyuser_hue_groups=*
-      - CORE_CONF_io_compression_codecs=org.apache.hadoop.io.compress.SnappyCodec
       - HDFS_CONF_dfs_webhdfs_enabled=true
       - HDFS_CONF_dfs_permissions_enabled=false
-      - HDFS_CONF_dfs_nameservices=hdfscluster
       - HDFS_CONF_dfs_replication=1
+      - HDFS_CONF_dfs_namenode_datanode_registration_ip___hostname___check=false
     ports:
       - "9870:9870"  # NameNode Web UI
       - "9000:9000"  # HDFS port
     volumes:
       - hdfs-namenode:/hadoop/dfs/name
-      - ./hdfs/config:/opt/hadoop/etc/hadoop
-    command: ["hdfs", "namenode"]
     networks:
       - cdc-network
 
   # HDFS DataNode
   hdfs-datanode:
-    image: apache/hadoop:3.3.4
+    image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
     container_name: cdc-hdfs-datanode
     hostname: datanode
     environment:
@@ -145,17 +142,14 @@ services:
       - CORE_CONF_hadoop_http_staticuser_user=root
       - CORE_CONF_hadoop_proxyuser_hue_hosts=*
       - CORE_CONF_hadoop_proxyuser_hue_groups=*
-      - CORE_CONF_io_compression_codecs=org.apache.hadoop.io.compress.SnappyCodec
       - HDFS_CONF_dfs_webhdfs_enabled=true
       - HDFS_CONF_dfs_permissions_enabled=false
-      - HDFS_CONF_dfs_nameservices=hdfscluster
       - HDFS_CONF_dfs_replication=1
     ports:
       - "9864:9864"  # DataNode Web UI
       - "9866:9866"  # DataNode IPC port
     volumes:
       - hdfs-datanode:/hadoop/dfs/data
-      - ./hdfs/config:/opt/hadoop/etc/hadoop
     command: ["hdfs", "datanode"]
     networks:
       - cdc-network
@@ -165,14 +159,13 @@ services:
 
   # HDFS Client (for testing and management)
   hdfs-client:
-    image: apache/hadoop:3.3.4
+    image: bde2020/hadoop-namenode:2.0.0-hadoop3.2.1-java8
     container_name: cdc-hdfs-client
     hostname: hdfs-client
     environment:
       - CORE_CONF_fs_defaultFS=hdfs://namenode:9000
       - CORE_CONF_hadoop_http_staticuser_user=root
-    volumes:
-      - ./hdfs/config:/opt/hadoop/etc/hadoop
+    volumes: []
     command: ["tail", "-f", "/dev/null"]  # Keep container running
     networks:
       - cdc-network

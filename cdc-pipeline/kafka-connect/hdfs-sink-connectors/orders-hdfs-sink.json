@@ -1,0 +1,26 @@
+{
+    "name": "orders-hdfs-sink",
+    "config": {
+      "connector.class": "io.confluent.connect.hdfs.HdfsSinkConnector",
+      "tasks.max": "1",
+      "topics": "cdc_demo.ecommerce.orders",
+      "hdfs.url": "hdfs://namenode:9000",
+      "flush.size": "1000",
+      "rotate.interval.ms": "900000",
+      "rotate.schedule.interval.ms": "60000",
+      "topics.dir": "/cdc/ecommerce",
+      "logs.dir": "/cdc/logs",
+      "key.converter": "org.apache.kafka.connect.json.JsonConverter",
+      "value.converter": "org.apache.kafka.connect.json.JsonConverter",
+      "key.converter.schemas.enable": "false",
+      "value.converter.schemas.enable": "false",
+      "format.class": "io.confluent.connect.hdfs.json.JsonFormat",
+      "partitioner.class": "io.confluent.connect.hdfs.partitioner.TimeBasedPartitioner",
+      "path.format": "'year'=yyyy/'month'=MM/'day'=dd/'hour'=HH",
+      "partition.duration.ms": "3600000",
+      "locale": "en_US",
+      "timezone": "UTC",
+      "filename.offset.zero.pad.width": "10",
+      "hdfs.authentication.kerberos": "false"
+    }
+  }
