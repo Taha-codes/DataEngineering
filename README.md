@@ -83,8 +83,6 @@ curl -s -X POST http://localhost:8083/connectors -H 'Content-Type: application/j
 }' | jq .
 ```
 
-You can also tune this to write JSON if preferred by using the JSON converter/format.
-
 ---
 
 ## Test the pipeline
