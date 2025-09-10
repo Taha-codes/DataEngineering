@@ -206,9 +206,3 @@ DataEngineering/
     kafka-connect-data/
     scripts/
 ```
-
----
-
-## License
-
-MIT (or your preferred license). Replace this section if different.
